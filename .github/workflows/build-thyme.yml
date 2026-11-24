@@ -21,6 +21,192 @@ jobs:
           mkdir -p kernel
           tar xzf src.tar.gz -C kernel --strip-components=1
           cp kernel/arch/arm64/configs/vendor/kona-perf_defconfig kernel/arch/arm64/configs/thyme_defconfig
+      - name: integrate sukisu builtin
+        run: |
+          set -euxo pipefail
+          cd kernel
+          git clone https://github.com/SukiSU-Nova/SukiSU-Nova KernelSU
+          git -C KernelSU checkout builtin
+          ln -sfn ../KernelSU/kernel drivers/kernelsu
+          printf '\nobj-$(CONFIG_KSU) += kernelsu/\n' >> drivers/Makefile
+          sed -i '/^endmenu/i source "drivers/kernelsu/Kconfig"' drivers/Kconfig
+          ls drivers/kernelsu | head -n 30
+      - name: kernel tree fixes
+        run: |
+          set -euxo pipefail
+          cd kernel
+          T=techpack/audio/asoc/codecs/tfa98xx
+          if [ ! -f "$T/src/config.h" ]; then cp "$T/inc/config.h" "$T/src/config.h"; fi
+      - name: configure
+        run: |
+          set -euxo pipefail
+          cd kernel
+          make O=out ARCH=arm64 thyme_defconfig
+          ./scripts/config --file out/.config -e KSU -e KPROBES -e KALLSYMS -e KALLSYMS_ALL -e MODULES -e EXT4_FS -e OVERLAY_FS -d KSU_SUSFS -d KPM -d KSU_DEBUG
+          make O=out ARCH=arm64 olddefconfig
+          grep -E '^CONFIG_(KSU|KPROBES|KALLSYMS|MODULES)' out/.config || true
+      - name: prepare selinux headers
+        run: |
+          cd kernel
+          make O=out ARCH=arm64 -j"$(nproc)" CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- security/selinux/ > /dev/null 2>&1 || true
+      - name: quick check sukisu build
+        run: |
+          cd kernel
+          INC="-I$(pwd)/security/selinux/include -I$(pwd)/security/selinux -I$(pwd)/out/security/selinux"
+          make O=out ARCH=arm64 -j"$(nproc)" CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- KCFLAGS="$INC -Wno-error=implicit-int -Wno-error=implicit-function-declaration -Wno-error=int-conversion -Wno-error=incompatible-pointer-types" -k drivers/kernelsu/ > /tmp/ksu.log 2>&1
+          RC=$?
+          if [ $RC -ne 0 ]; then exit $RC; fi
+          echo "kernelsu objects built ok"
+      - name: build image
+        run: |
+          cd kernel
+          INC="-I$(pwd)/security/selinux/include -I$(pwd)/security/selinux -I$(pwd)/out/security/selinux"
+          make O=out ARCH=arm64 -j"$(nproc)" CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- KCFLAGS="$INC -Wno-error=implicit-int -Wno-error=implicit-function-declaration -Wno-error=int-conversion -Wno-error=incompatible-pointer-types" Image > /tmp/img.log 2>&1
+          RC=$?
+          if [ $RC -ne 0 ]; then exit $RC; fi
+          ls -l out/arch/arm64/boot/Image
+      - name: pack anykernel3
+        run: |
+          set -euxo pipefail
+          git clone --depth 1 https://github.com/osm0sis/AnyKernel3 ak3
+          cp kernel/out/arch/arm64/boot/Image ak3/Image
+          cd ak3
+          sed -i 's/^do.devicecheck=.*/do.devicecheck=0/' anykernel.sh
+          sed -i 's/^do.modules=.*/do.modules=0/' anykernel.sh
+          rm -rf .git .github
+          cd ..
+          (cd ak3 && zip -r9 ../AK3_thyme_sukisu.zip .)
+          ls -l AK3_thyme_sukisu.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AK3-thyme-sukisu
+          path: |
+            AK3_thyme_sukisu.zip
+            kernel/out/.config
+      - name: save build logs
+        if: always()name: build-thyme-sukisu
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 200
+    steps:
+      - name: install deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc bison flex build-essential libssl-dev libncurses-dev lz4 lzop device-tree-compiler zip unzip python3 cpio git curl clang lld llvm gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
+      - name: fetch kernel source
+        run: |
+          set -euxo pipefail
+          curl -L --retry 5 --retry-all-errors -o src.tar.gz "https://codeload.github.com/AstideLabs/android_kernel_xiaomi_sm8250/tar.gz/refs/heads/android17-aptusitu-new"
+          mkdir -p kernel
+          tar xzf src.tar.gz -C kernel --strip-components=1
+          cp kernel/arch/arm64/configs/vendor/kona-perf_defconfig kernel/arch/arm64/configs/thyme_defconfig
+      - name: integrate sukisu builtin
+        run: |
+          set -euxo pipefail
+          cd kernel
+          git clone https://github.com/SukiSU-Nova/SukiSU-Nova KernelSU
+          git -C KernelSU checkout builtin
+          ln -sfn ../KernelSU/kernel drivers/kernelsu
+          printf '\nobj-$(CONFIG_KSU) += kernelsu/\n' >> drivers/Makefile
+          sed -i '/^endmenu/i source "drivers/kernelsu/Kconfig"' drivers/Kconfig
+          ls drivers/kernelsu | head -n 30
+      - name: kernel tree fixes
+        run: |
+          set -euxo pipefail
+          cd kernel
+          T=techpack/audio/asoc/codecs/tfa98xx
+          if [ ! -f "$T/src/config.h" ]; then cp "$T/inc/config.h" "$T/src/config.h"; fi
+      - name: configure
+        run: |
+          set -euxo pipefail
+          cd kernel
+          make O=out ARCH=arm64 thyme_defconfig
+          ./scripts/config --file out/.config -e KSU -e KPROBES -e KALLSYMS -e KALLSYMS_ALL -e MODULES -e EXT4_FS -e OVERLAY_FS -d KSU_SUSFS -d KPM -d KSU_DEBUG
+          make O=out ARCH=arm64 olddefconfig
+          grep -E '^CONFIG_(KSU|KPROBES|KALLSYMS|MODULES)' out/.config || true
+      - name: prepare selinux headers
+        run: |
+          cd kernel
+          make O=out ARCH=arm64 -j"$(nproc)" CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- security/selinux/ > /dev/null 2>&1 || true
+      - name: quick check sukisu build
+        run: |
+          cd kernel
+          INC="-I$(pwd)/security/selinux/include -I$(pwd)/security/selinux -I$(pwd)/out/security/selinux"
+          make O=out ARCH=arm64 -j"$(nproc)" CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- KCFLAGS="$INC -Wno-error=implicit-int -Wno-error=implicit-function-declaration -Wno-error=int-conversion -Wno-error=incompatible-pointer-types" -k drivers/kernelsu/ > /tmp/ksu.log 2>&1
+          RC=$?
+          if [ $RC -ne 0 ]; then exit $RC; fi
+          echo "kernelsu objects built ok"
+      - name: build image
+        run: |
+          cd kernel
+          INC="-I$(pwd)/security/selinux/include -I$(pwd)/security/selinux -I$(pwd)/out/security/selinux"
+          make O=out ARCH=arm64 -j"$(nproc)" CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- KCFLAGS="$INC -Wno-error=implicit-int -Wno-error=implicit-function-declaration -Wno-error=int-conversion -Wno-error=incompatible-pointer-types" Image > /tmp/img.log 2>&1
+          RC=$?
+          if [ $RC -ne 0 ]; then exit $RC; fi
+          ls -l out/arch/arm64/boot/Image
+      - name: pack anykernel3
+        run: |
+          set -euxo pipefail
+          git clone --depth 1 https://github.com/osm0sis/AnyKernel3 ak3
+          cp kernel/out/arch/arm64/boot/Image ak3/Image
+          cd ak3
+          sed -i 's/^do.devicecheck=.*/do.devicecheck=0/' anykernel.sh
+          sed -i 's/^do.modules=.*/do.modules=0/' anykernel.sh
+          rm -rf .git .github
+          cd ..
+          (cd ak3 && zip -r9 ../AK3_thyme_sukisu.zip .)
+          ls -l AK3_thyme_sukisu.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AK3-thyme-sukisu
+          path: |
+            AK3_thyme_sukisu.zip
+            kernel/out/.config
+      - name: save build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: |
+            /tmp/ksu.log
+            /tmp/img.log
+
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: |
+            /tmp/ksu.log
+            /tmp/img.log
+name: build-thyme-sukisu
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 200
+    steps:
+      - name: install deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc bison flex build-essential libssl-dev libncurses-dev lz4 lzop device-tree-compiler zip unzip python3 cpio git curl clang lld llvm gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
+      - name: fetch kernel source
+        run: |
+          set -euxo pipefail
+          curl -L --retry 5 --retry-all-errors -o src.tar.gz "https://codeload.github.com/AstideLabs/android_kernel_xiaomi_sm8250/tar.gz/refs/heads/android17-aptusitu-new"
+          mkdir -p kernel
+          tar xzf src.tar.gz -C kernel --strip-components=1
+          cp kernel/arch/arm64/configs/vendor/kona-perf_defconfig kernel/arch/arm64/configs/thyme_defconfig
       - name: integrate sukisu
         run: |
           set -euxo pipefail

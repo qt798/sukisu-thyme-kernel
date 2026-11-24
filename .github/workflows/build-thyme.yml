@@ -37,6 +37,7 @@ jobs:
           cd kernel
           T=techpack/audio/asoc/codecs/tfa98xx
           if [ ! -f "$T/src/config.h" ]; then cp "$T/inc/config.h" "$T/src/config.h"; fi
+          printf '\nccflags-y += -I$(srctree)/techpack/audio/asoc/codecs/tfa98xx/inc -I$(srctree)/techpack/audio/asoc/codecs/tfa98xx\nccflags-y += -Wno-error\n' >> "$T/Kbuild"
           python3 - <<'PY'
           p = 'drivers/kernelsu/kernel_includes.h'
           s = open(p).read()

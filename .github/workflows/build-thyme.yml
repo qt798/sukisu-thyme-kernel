@@ -37,6 +37,16 @@ jobs:
           cd kernel
           T=techpack/audio/asoc/codecs/tfa98xx
           if [ ! -f "$T/src/config.h" ]; then cp "$T/inc/config.h" "$T/src/config.h"; fi
+          python3 - <<'PY'
+          p = 'drivers/kernelsu/kernel_includes.h'
+          s = open(p).read()
+          old = '#include <linux/static_call.h>'
+          new = '#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0)\n' + old + '\n#endif'
+          if old in s:
+              s = s.replace(old, new, 1)
+              open(p, 'w').write(s)
+          print('static_call guard ok')
+          PY
       - name: configure
         run: |
           set -euxo pipefail

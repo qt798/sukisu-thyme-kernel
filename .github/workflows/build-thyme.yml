@@ -174,3 +174,13 @@ jobs:
           path: |
             AK3_thyme_sukisu.zip
             kernel/out/.config
+
+
+      - name: save build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: |
+            /tmp/ksu.log
+            /tmp/img.log

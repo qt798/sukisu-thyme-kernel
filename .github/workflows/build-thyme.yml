@@ -30,17 +30,38 @@ jobs:
           ln -sfn ../KernelSU/kernel drivers/kernelsu
           printf '\nobj-$(CONFIG_KSU) += kernelsu/\n' >> drivers/Makefile
           sed -i '/^endmenu/i source "drivers/kernelsu/Kconfig"' drivers/Kconfig
-          grep -rn "source \"drivers/kernelsu/Kconfig\"" drivers/Kconfig
+          grep -rn "drivers/kernelsu/Kconfig" drivers/Kconfig
       - name: patch for kernel 4.19
         run: |
           set -euxo pipefail
           cd kernel
-          # MODULE_IMPORT_NS does not exist on 4.19
           grep -rl "MODULE_IMPORT_NS" drivers/kernelsu | xargs -r sed -i 's/MODULE_IMPORT_NS([^)]*);/;/g'
-          # tfa98xx expects config.h next to its sources
           T=techpack/audio/asoc/codecs/tfa98xx
           if [ ! -f "$T/src/config.h" ]; then cp "$T/inc/config.h" "$T/src/config.h"; fi
-          ls -l "$T/src/config.h"
+          python3 - <<'PY'
+          import sys
+          p = 'drivers/kernelsu/infra/file_wrapper.c'
+          s = open(p).read()
+          def rep(old, new):
+              global s
+              if old not in s:
+                  sys.exit('anchor missing: ' + old[:60])
+              s = s.replace(old, new, 1)
+          rep("#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)\nstatic int ksu_wrapper_iopoll",
+              "#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 1, 0)\n#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)\nstatic int ksu_wrapper_iopoll")
+          rep("    return orig->f_op->iopoll(kiocb, spin);\n}\n#endif",
+              "    return orig->f_op->iopoll(kiocb, spin);\n}\n#endif\n#endif")
+          rep("    p->ops.iopoll = fp->f_op->iopoll ? ksu_wrapper_iopoll : NULL;",
+              "#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 1, 0)\n    p->ops.iopoll = fp->f_op->iopoll ? ksu_wrapper_iopoll : NULL;\n#endif")
+          rep("static loff_t ksu_wrapper_remap_file_range(struct file *file_in, loff_t pos_in, struct file *file_out, loff_t pos_out,",
+              "#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 0, 0)\nstatic loff_t ksu_wrapper_remap_file_range(struct file *file_in, loff_t pos_in, struct file *file_out, loff_t pos_out,")
+          rep("        return orig->f_op->remap_file_range(orig, pos_in, file_out, pos_out, len, remap_flags);\n    }\n}",
+              "        return orig->f_op->remap_file_range(orig, pos_in, file_out, pos_out, len, remap_flags);\n    }\n}\n#endif")
+          rep("    p->ops.remap_file_range = fp->f_op->remap_file_range ? ksu_wrapper_remap_file_range : NULL;",
+              "#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 0, 0)\n    p->ops.remap_file_range = fp->f_op->remap_file_range ? ksu_wrapper_remap_file_range : NULL;\n#endif")
+          open(p, 'w').write(s)
+          print('patched file_wrapper.c')
+          PY
       - name: configure
         run: |
           set -euxo pipefail
@@ -49,6 +70,12 @@ jobs:
           ./scripts/config --file out/.config -e KSU -e KSU_MANUAL_HOOK -e KPROBES -e KALLSYMS -e KALLSYMS_ALL -e MODULES -e EXT4_FS -e OVERLAY_FS -d KSU_SUSFS
           make O=out ARCH=arm64 olddefconfig
           grep -E '^CONFIG_(KSU|KPROBES|KALLSYMS_ALL|MODULES|EXT4_FS)' out/.config
+      - name: quick check sukisu build
+        run: |
+          set -euxo pipefail
+          cd kernel
+          make O=out ARCH=arm64 -j"$(nproc)" CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- KCFLAGS="-Wno-error=implicit-int -Wno-error=implicit-function-declaration -Wno-error=int-conversion -Wno-error=incompatible-pointer-types" drivers/kernelsu/
+          echo "kernelsu objects built ok"
       - name: build image
         run: |
           set -euxo pipefail

@@ -64,7 +64,16 @@ jobs:
           if old in s:
               s = s.replace(old, new, 1)
               open(p, 'w').write(s)
-          print('guards ok')
+          p = 'drivers/kernelsu/Makefile'
+          lines = open(p).readlines()
+          out = []
+          for line in lines:
+              if line.startswith('KSU_VERSION') and ':=' in line and 'LOCAL_COUNT' in line:
+                  out.append('KSU_VERSION     := 35000\n')
+              else:
+                  out.append(line)
+          open(p, 'w').writelines(out)
+          print('version pinned 35000')
           PY
       - name: configure
         run: |

@@ -40,27 +40,53 @@ jobs:
           if [ ! -f "$T/src/config.h" ]; then cp "$T/inc/config.h" "$T/src/config.h"; fi
           python3 - <<'PY'
           import sys
-          p = 'drivers/kernelsu/infra/file_wrapper.c'
-          s = open(p).read()
-          def rep(old, new):
-              global s
+          def load(p):
+              return open(p).read()
+          def save(p, s):
+              open(p, 'w').write(s)
+          def rep(s, old, new):
               if old not in s:
                   sys.exit('anchor missing: ' + old[:60])
-              s = s.replace(old, new, 1)
-          rep("#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)\nstatic int ksu_wrapper_iopoll",
-              "#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 1, 0)\n#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)\nstatic int ksu_wrapper_iopoll")
-          rep("    return orig->f_op->iopoll(kiocb, spin);\n}\n#endif",
-              "    return orig->f_op->iopoll(kiocb, spin);\n}\n#endif\n#endif")
-          rep("    p->ops.iopoll = fp->f_op->iopoll ? ksu_wrapper_iopoll : NULL;",
-              "#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 1, 0)\n    p->ops.iopoll = fp->f_op->iopoll ? ksu_wrapper_iopoll : NULL;\n#endif")
-          rep("static loff_t ksu_wrapper_remap_file_range(struct file *file_in, loff_t pos_in, struct file *file_out, loff_t pos_out,",
-              "#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 0, 0)\nstatic loff_t ksu_wrapper_remap_file_range(struct file *file_in, loff_t pos_in, struct file *file_out, loff_t pos_out,")
-          rep("        return orig->f_op->remap_file_range(orig, pos_in, file_out, pos_out, len, remap_flags);\n    }\n}",
-              "        return orig->f_op->remap_file_range(orig, pos_in, file_out, pos_out, len, remap_flags);\n    }\n}\n#endif")
-          rep("    p->ops.remap_file_range = fp->f_op->remap_file_range ? ksu_wrapper_remap_file_range : NULL;",
-              "#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 0, 0)\n    p->ops.remap_file_range = fp->f_op->remap_file_range ? ksu_wrapper_remap_file_range : NULL;\n#endif")
-          open(p, 'w').write(s)
-          print('patched file_wrapper.c')
+              return s.replace(old, new, 1)
+          p = 'drivers/kernelsu/infra/file_wrapper.c'
+          s = load(p)
+          s = rep(s, "#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)\nstatic int ksu_wrapper_iopoll",
+                  "#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 1, 0)\n#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)\nstatic int ksu_wrapper_iopoll")
+          s = rep(s, "    return orig->f_op->iopoll(kiocb, spin);\n}\n#endif",
+                  "    return orig->f_op->iopoll(kiocb, spin);\n}\n#endif\n#endif")
+          s = rep(s, "    p->ops.iopoll = fp->f_op->iopoll ? ksu_wrapper_iopoll : NULL;",
+                  "#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 1, 0)\n    p->ops.iopoll = fp->f_op->iopoll ? ksu_wrapper_iopoll : NULL;\n#endif")
+          s = rep(s, "static loff_t ksu_wrapper_remap_file_range(struct file *file_in, loff_t pos_in, struct file *file_out, loff_t pos_out,",
+                  "#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 0, 0)\nstatic loff_t ksu_wrapper_remap_file_range(struct file *file_in, loff_t pos_in, struct file *file_out, loff_t pos_out,")
+          s = rep(s, "        return orig->f_op->remap_file_range(orig, pos_in, file_out, pos_out, len, remap_flags);\n    }\n}",
+                  "        return orig->f_op->remap_file_range(orig, pos_in, file_out, pos_out, len, remap_flags);\n    }\n}\n#endif")
+          s = rep(s, "    p->ops.remap_file_range = fp->f_op->remap_file_range ? ksu_wrapper_remap_file_range : NULL;",
+                  "#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 0, 0)\n    p->ops.remap_file_range = fp->f_op->remap_file_range ? ksu_wrapper_remap_file_range : NULL;\n#endif")
+          save(p, s)
+          p = 'drivers/kernelsu/infra/su_mount_ns.c'
+          s = load(p)
+          s = rep(s, "#include <uapi/linux/mount.h>", "#include <linux/mount.h>")
+          save(p, s)
+          p = 'drivers/kernelsu/infra/seccomp_cache.c'
+          s = load(p)
+          stub = """#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 0, 0)
+          void ksu_seccomp_clear_cache(struct seccomp_filter *filter, int nr)
+          {
+              (void)filter;
+              (void)nr;
+          }
+
+          void ksu_seccomp_allow_cache(struct seccomp_filter *filter, int nr)
+          {
+              (void)filter;
+              (void)nr;
+          }
+          #else
+          """
+          s = rep(s, "struct action_cache {", stub + "struct action_cache {")
+          s = s + "\n#endif\n"
+          save(p, s)
+          print('4.19 patches applied')
           PY
       - name: configure
         run: |
@@ -70,17 +96,31 @@ jobs:
           ./scripts/config --file out/.config -e KSU -e KSU_MANUAL_HOOK -e KPROBES -e KALLSYMS -e KALLSYMS_ALL -e MODULES -e EXT4_FS -e OVERLAY_FS -d KSU_SUSFS
           make O=out ARCH=arm64 olddefconfig
           grep -E '^CONFIG_(KSU|KPROBES|KALLSYMS_ALL|MODULES|EXT4_FS)' out/.config
+      - name: prepare selinux headers
+        run: |
+          set -euxo pipefail
+          cd kernel
+          make O=out ARCH=arm64 -j"$(nproc)" CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- security/selinux/
+          find . -path '*security/selinux/include/flask.h' | head -n 5
       - name: quick check sukisu build
         run: |
           set -euxo pipefail
           cd kernel
-          make O=out ARCH=arm64 -j"$(nproc)" CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- KCFLAGS="-Wno-error=implicit-int -Wno-error=implicit-function-declaration -Wno-error=int-conversion -Wno-error=incompatible-pointer-types" drivers/kernelsu/
+          mkdir -p out/security/selinux/include
+          FL=$(find . -path '*security/selinux/include/flask.h' | head -n 1)
+          if [ -z "$FL" ]; then echo "flask.h not generated"; exit 1; fi
+          cp -f "$FL" out/security/selinux/include/flask.h
+          AP=$(find . -path '*security/selinux/include/av_permissions.h' | head -n 1)
+          [ -n "$AP" ] && cp -f "$AP" out/security/selinux/include/av_permissions.h || true
+          INC="-I$(pwd)/security/selinux/include -I$(pwd)/out/security/selinux/include"
+          make O=out ARCH=arm64 -j"$(nproc)" CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- KCFLAGS="$INC -Wno-error=implicit-int -Wno-error=implicit-function-declaration -Wno-error=int-conversion -Wno-error=incompatible-pointer-types" drivers/kernelsu/
           echo "kernelsu objects built ok"
       - name: build image
         run: |
           set -euxo pipefail
           cd kernel
-          make O=out ARCH=arm64 -j"$(nproc)" CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- KCFLAGS="-Wno-error=implicit-int -Wno-error=implicit-function-declaration -Wno-error=int-conversion -Wno-error=incompatible-pointer-types" Image
+          INC="-I$(pwd)/security/selinux/include -I$(pwd)/out/security/selinux/include"
+          make O=out ARCH=arm64 -j"$(nproc)" CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- KCFLAGS="$INC -Wno-error=implicit-int -Wno-error=implicit-function-declaration -Wno-error=int-conversion -Wno-error=incompatible-pointer-types" Image
           ls -l out/arch/arm64/boot/Image
       - name: pack anykernel3
         run: |

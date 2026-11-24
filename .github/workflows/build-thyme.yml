@@ -45,10 +45,12 @@ jobs:
           ./scripts/config --file out/.config -e KSU -e KPROBES -e KALLSYMS -e KALLSYMS_ALL -e MODULES -e EXT4_FS -e OVERLAY_FS -d KSU_SUSFS -d KPM -d KSU_DEBUG
           make O=out ARCH=arm64 olddefconfig
           grep -E '^CONFIG_(KSU|KPROBES|KALLSYMS|MODULES)' out/.config || true
-      - name: prepare selinux headers
+      - name: prepare build tree
         run: |
           cd kernel
+          make O=out ARCH=arm64 CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- prepare > /tmp/ksu.log 2>&1 || true
           make O=out ARCH=arm64 -j"$(nproc)" CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- security/selinux/ > /dev/null 2>&1 || true
+          ls out/include/generated/compile.h
       - name: quick check sukisu build
         run: |
           cd kernel

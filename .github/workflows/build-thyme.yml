@@ -50,7 +50,8 @@ jobs:
           cd kernel
           make O=out ARCH=arm64 CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- prepare > /tmp/ksu.log 2>&1 || true
           make O=out ARCH=arm64 -j"$(nproc)" CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- security/selinux/ > /dev/null 2>&1 || true
-          ls out/include/generated/compile.h
+          sh scripts/mkcompile_h out/include/generated/compile.h arm64 y y "clang 18.1.3" ld || true
+          ls -l out/include/generated/compile.h || true
       - name: quick check sukisu build
         run: |
           cd kernel

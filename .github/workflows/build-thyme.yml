@@ -101,25 +101,22 @@ jobs:
           set -euxo pipefail
           cd kernel
           make O=out ARCH=arm64 -j"$(nproc)" CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- security/selinux/
-          find . -path '*security/selinux/include/flask.h' | head -n 5
+          find out -name flask.h -o -name av_permissions.h
       - name: quick check sukisu build
         run: |
           set -euxo pipefail
           cd kernel
-          mkdir -p out/security/selinux/include
-          FL=$(find . -path '*security/selinux/include/flask.h' | head -n 1)
+          FL=$(find out -name flask.h | head -n 1)
           if [ -z "$FL" ]; then echo "flask.h not generated"; exit 1; fi
-          cp -f "$FL" out/security/selinux/include/flask.h
-          AP=$(find . -path '*security/selinux/include/av_permissions.h' | head -n 1)
-          [ -n "$AP" ] && cp -f "$AP" out/security/selinux/include/av_permissions.h || true
-          INC="-I$(pwd)/security/selinux/include -I$(pwd)/out/security/selinux/include"
+          echo "flask.h at $FL"
+          INC="-I$(pwd)/security/selinux/include -I$(pwd)/security/selinux -I$(pwd)/out/security/selinux"
           make O=out ARCH=arm64 -j"$(nproc)" CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- KCFLAGS="$INC -Wno-error=implicit-int -Wno-error=implicit-function-declaration -Wno-error=int-conversion -Wno-error=incompatible-pointer-types" drivers/kernelsu/
           echo "kernelsu objects built ok"
       - name: build image
         run: |
           set -euxo pipefail
           cd kernel
-          INC="-I$(pwd)/security/selinux/include -I$(pwd)/out/security/selinux/include"
+          INC="-I$(pwd)/security/selinux/include -I$(pwd)/security/selinux -I$(pwd)/out/security/selinux"
           make O=out ARCH=arm64 -j"$(nproc)" CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- KCFLAGS="$INC -Wno-error=implicit-int -Wno-error=implicit-function-declaration -Wno-error=int-conversion -Wno-error=incompatible-pointer-types" Image
           ls -l out/arch/arm64/boot/Image
       - name: pack anykernel3

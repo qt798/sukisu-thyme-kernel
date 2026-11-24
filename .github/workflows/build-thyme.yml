@@ -136,11 +136,7 @@ jobs:
           INC="-I$(pwd)/security/selinux/include -I$(pwd)/security/selinux -I$(pwd)/out/security/selinux"
           make O=out ARCH=arm64 -j"$(nproc)" CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- KCFLAGS="$INC -Wno-error=implicit-int -Wno-error=implicit-function-declaration -Wno-error=int-conversion -Wno-error=incompatible-pointer-types" -k drivers/kernelsu/ > /tmp/ksu.log 2>&1
           RC=$?
-          echo "### ksu build errors" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          grep -E 'error:|fatal error' /tmp/ksu.log | head -n 60 >> $GITHUB_STEP_SUMMARY || true
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          if [ $RC -ne 0 ]; then tail -n 15 /tmp/ksu.log >> $GITHUB_STEP_SUMMARY; exit $RC; fi
+          if [ $RC -ne 0 ]; then exit $RC; fi
           echo "kernelsu objects built ok"
       - name: build image
         run: |
@@ -148,13 +144,7 @@ jobs:
           INC="-I$(pwd)/security/selinux/include -I$(pwd)/security/selinux -I$(pwd)/out/security/selinux"
           make O=out ARCH=arm64 -j"$(nproc)" CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip CROSS_COMPILE=aarch64-linux-gnu- CLANG_TRIPLE=aarch64-linux-gnu- KCFLAGS="$INC -Wno-error=implicit-int -Wno-error=implicit-function-declaration -Wno-error=int-conversion -Wno-error=incompatible-pointer-types" Image > /tmp/img.log 2>&1
           RC=$?
-          if [ $RC -ne 0 ]; then
-            echo "### image build errors" >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-            grep -E 'error:|fatal error' /tmp/img.log | head -n 60 >> $GITHUB_STEP_SUMMARY || true
-            echo '```' >> $GITHUB_STEP_SUMMARY
-            exit $RC
-          fi
+          if [ $RC -ne 0 ]; then exit $RC; fi
           ls -l out/arch/arm64/boot/Image
       - name: pack anykernel3
         run: |
@@ -174,8 +164,6 @@ jobs:
           path: |
             AK3_thyme_sukisu.zip
             kernel/out/.config
-
-
       - name: save build logs
         if: always()
         uses: actions/upload-artifact@v4
